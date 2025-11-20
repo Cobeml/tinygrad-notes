@@ -1,32 +1,16 @@
 # How to add a custom accelerator?
 
-One of the premise of tinygrad is that it is simple to 
-add support for new accelerator. 
-So if you want to try out
-new hardware, you can implement the support with ease. 
+One of the premise of tinygrad is that it is simple to add support for new accelerator. So if you want to try out new hardware, you can implement the support with ease.
 
-If you have read the official doc on 
-[adding accelerator](https://github.com/tinygrad/tinygrad/blob/master/docs/adding_new_accelerators.md)
-you may know that are 21 operations to implement. But it doesn't explain how
-things fit together in tinygrad and may be too abstract. I will try to fill
-in that gap in this post. I also won't dive into too much details on the code
-generation part or the details of Metal runtime, but rather give you a good starting
-ground if you are looking to add implementation yourself.
+If you have read the official doc on [adding accelerator](https://github.com/tinygrad/tinygrad/blob/master/docs/adding_new_accelerators.md) you may know that are 21 operations to implement. But it doesn't explain how things fit together in tinygrad and may be too abstract. I will try to fill in that gap in this post. I also won't dive into too much details on the code generation part or the details of Metal runtime, but rather give you a good starting ground if you are looking to add implementation yourself.
 
-Prerequisite reading is the [tinygrad's IR](uops.md) and
-[tinygrad backend](backends.md).
+Prerequisite reading is the [tinygrad's IR](uops.md) and [tinygrad backend](backends.md).
 
-I'll pretend to implement a secodn my metal accelerator called "mymetal". To inject it to tinygrad,
-we create a file with a specific naming format, that way the `importlibs` will pick it up and parse the string, and also that
-you can specify MYMETAL=1 in the env variable to instruct tinygrad
-to use it. I will **have to** place it in the `runtime` directory and 
-name it "ops_mymetal.py":
+I'll pretend to implement a secodn my metal accelerator called "mymetal". To inject it to tinygrad, we create a file with a specific naming format, that way the `importlibs` will pick it up and parse the string, and also that you can specify MYMETAL=1 in the env variable to instruct tinygrad to use it. I will **have to** place it in the `runtime` directory and name it "ops_mymetal.py":
 
 <img src="images/img31.png">
 
-Within the file, we are required to define a class with suffix 
-"Device" as its name so the upstream
-stuff can find it, via this function in `device.py`:
+Within the file, we are required to define a class with suffix "Device" as its name so the upstream stuff can find it, via this function in `device.py`:
 
 ```python
   def __get_canonicalized_item(self, ix:str) -> Compiled:
@@ -43,8 +27,7 @@ class MyMetalDevice:
         print("Mymetal device is initialized with args:", args, kwargs)
 ```
 
-Throughout the guide, I will again use the dot product example, save
-the following in a script.py anywhere
+Throughout the guide, I will again use the dot product example, save the following in a script.py anywhere
 
 ```python
 from tinygrad.tensor import Tensor
@@ -60,8 +43,7 @@ print(d)
 
 ```
 
-Now if you run the script with `MYMETAL=1 python script.py`, you will
-see errors but more importantly, a line printed like so:
+Now if you run the script with `MYMETAL=1 python script.py`, you will see errors but more importantly, a line printed like so:
 
 ```
 Mymetal device is initialized with args: ('MYMETAL',)
@@ -71,8 +53,7 @@ Yay! Our custom class is now integrated into the rest of tinygrad.
 
 Next we need to start implementing methods so it functions properly.
 
-The entrypoint to our device is in `lower_schedule_item` function
-in `realize.py`:
+The entrypoint to our device is in `lower_schedule_item` function in `realize.py`:
 
 ```python
 def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
@@ -98,11 +79,7 @@ def run_schedule(schedule:List[ScheduleItem]):
       prg.exec(real_buffers, si.var_vals)
 ```
 
-You can see that each schedule item is converted into a program that has an `.exec`
-method defined, and will be called in order. To generalize this, the returned item must be an instance
-of a class that inherits
-`JITRunner`, whether it is used as a kernel or a memory allocation. The base
-JITRunner is defined as such:
+You can see that each schedule item is converted into a program that has an `.exec` method defined, and will be called in order. To generalize this, the returned item must be an instance of a class that inherits `JITRunner`, whether it is used as a kernel or a memory allocation. The base JITRunner is defined as such:
 
 ```python
 class JITRunner:
@@ -119,9 +96,7 @@ class JITRunner:
     raise NotImplementedError("override this")
 ```
 
-Since there are shared traits among all the accelerators, we can further abstract two base
-classes that inherits `JITRunner`. The first is `CompiledJITRunner` and the second
-is `BufferCopy`. Again I pasted only the illustrative part of the implementation:
+Since there are shared traits among all the accelerators, we can further abstract two base classes that inherits `JITRunner`. The first is `CompiledJITRunner` and the second is `BufferCopy`. Again I pasted only the illustrative part of the implementation:
 
 ```python
 class CompiledASTRunner(JITRunner):
@@ -148,12 +123,9 @@ class BufferCopy(JITRunner):
     self.copy(dest, src)
 ```
 
-So JITRunner will call the actual implementation of `__call__` method. If it is
-a memory allocator, some data copy is done, otherwise, the program, will be executed.
+So JITRunner will call the actual implementation of `__call__` method. If it is a memory allocator, some data copy is done, otherwise, the program, will be executed.
 
-But note that in the program's case, `self.clprg()` is implemented elsewhere, 
-and dest.copyin is also implemented elsewhere. Let's look break down the next
-abstraction. 
+But note that in the program's case, `self.clprg()` is implemented elsewhere, and dest.copyin is also implemented elsewhere. Let's look break down the next abstraction.
 
 In `lower_schedule_item` for a kernel (program), we see this line:
 
@@ -161,14 +133,7 @@ In `lower_schedule_item` for a kernel (program), we see this line:
 Device[si.outputs[0].device].get_runner(*si.ast)
 ```
 
-Remember that `Device[si.outputs[0].device]` dynamically resolve to the `ops___.py`
-file and initialize the device class, meaning our MyMetal device must implement
-get_runner method that returns a `CompiledASTRunner` instance, passing in the
-required program that can be executed. This is a common pattern across
-all accelerator so tinygrad already has a base class for such functionality,
-it is called `Compiled`, and in reference implementation for cuda, existing metal,
-and other accelerator, you can see that the `CudaDevice`, `MetalDevice` and so on
-all inherits from it:
+Remember that `Device[si.outputs[0].device]` dynamically resolve to the `ops___.py` file and initialize the device class, meaning our MyMetal device must implement get_runner method that returns a `CompiledASTRunner` instance, passing in the required program that can be executed. This is a common pattern across all accelerator so tinygrad already has a base class for such functionality, it is called `Compiled`, and in reference implementation for cuda, existing metal, and other accelerator, you can see that the `CudaDevice`, `MetalDevice` and so on all inherits from it:
 
 ```python
 class Compiled:
@@ -191,8 +156,7 @@ class Compiled:
   def get_runner(self, *ast:LazyOp) -> CompiledASTRunner: return self.to_program(self.get_linearizer(*ast))
 ```
 
-The actual implementation must pass the memory allocator, runtime, and compiler
-to the abstract class, Let's look at the actual implementation of MetalDevice:
+The actual implementation must pass the memory allocator, runtime, and compiler to the abstract class, Let's look at the actual implementation of MetalDevice:
 
 ```python
 class MetalDevice(Compiled):
@@ -207,10 +171,7 @@ class MetalDevice(Compiled):
                      functools.partial(MetalProgram, self), functools.partial(MetalGraph, self))
 ```
 
-and that's where the actual connection to the Metal runtime happens! 
-Memory allocation is done through `MetalAllocator(self)`, compiling the
-metal code to binary happens in `MetalCompiler(None if getenv("METAL_XCODE") else self), functools.partial(MetalProgram, self)`
-and the runtime is `functools.partial(MetalGraph, self)`. 
+and that's where the actual connection to the Metal runtime happens! Memory allocation is done through `MetalAllocator(self)`, compiling the metal code to binary happens in `MetalCompiler(None if getenv("METAL_XCODE") else self), functools.partial(MetalProgram, self)` and the runtime is `functools.partial(MetalGraph, self)`.
 
 We can see that the `MetalCompiler` must inherits `Compiler`, which looks like below:
 
@@ -227,8 +188,7 @@ class Compiler:
     return lib
 ```
 
-That's what executes the `self.compiler.render(to_function_name(k.name), k.uops)`
-in the `to_program` method of `CompiledASTRunner`. 
+That's what executes the `self.compiler.render(to_function_name(k.name), k.uops)` in the `to_program` method of `CompiledASTRunner`.
 
 `MetalAllocator` subclasses `Allocator`, which is defined like this:
 
@@ -245,14 +205,9 @@ class Allocator:
   def copyout(self, dest:memoryview, src): raise NotImplementedError("need copyout")
 ```
 
-and the `copyin` and `copyout` will handle the methodcall in `BufferCopy` we saw
-above (note that there's some intermediate class to optimize things, so between 
-Allocator and MetalAllocator there's also the `LRUAllocator`, but for simplicity
-I'm just showing the base class).
+and the `copyin` and `copyout` will handle the methodcall in `BufferCopy` we saw above (note that there's some intermediate class to optimize things, so between Allocator and MetalAllocator there's also the `LRUAllocator`, but for simplicity I'm just showing the base class).
 
-Now let's start the implementation, and I will mostly just be copying the 
-existing code because they pertain more to the Metal runtime rather than
-tinygrad. This is where we would start:
+Now let's start the implementation, and I will mostly just be copying the existing code because they pertain more to the Metal runtime rather than tinygrad. This is where we would start:
 
 ```python
 class MyMetalDevice:
@@ -289,13 +244,9 @@ class MyMetalDevice:
     )
 ```
 
-Some of the syntax are required by Metal API, you can see we imported
-the metal and libdispatch library, which are part of the objective-c and python bridge,
-you can refer to the [doc here](https://pyobjc.readthedocs.io/en/latest/apinotes/Metal.html)
+Some of the syntax are required by Metal API, you can see we imported the metal and libdispatch library, which are part of the objective-c and python bridge, you can refer to the [doc here](https://pyobjc.readthedocs.io/en/latest/apinotes/Metal.html)
 
-Next part is to fill in the memory allocator, we will subclass `LRUAllocator`
-which is a more refined version of the base Allocator and implement the required
-methods as well:
+Next part is to fill in the memory allocator, we will subclass `LRUAllocator` which is a more refined version of the base Allocator and implement the required methods as well:
 
 ```python
 from tinygrad.device import LRUAllocator
@@ -345,9 +296,7 @@ class MetalCompiler(Compiler):
   def render(self, name:str, uops) -> str: return MetalRenderer(name, uops)
 ```
 
-What's MetalRenderer? I won't go into the details, but it is the code generation.
-It takes a series of uops, and convert them to the Metal flavoured C++ code,
-this is the definition:
+What's MetalRenderer? I won't go into the details, but it is the code generation. It takes a series of uops, and convert them to the Metal flavoured C++ code, this is the definition:
 
 ```python
 {% raw %}
@@ -383,13 +332,9 @@ MetalRenderer = functools.partial(uops_to_cstyle, MetalLanguage())
 {% endraw %}
 ```
 
-Remember the [official guide](https://github.com/tinygrad/tinygrad/blob/master/docs/adding_new_accelerators.md) 
-on adding acclerator says you have to implement 21 required operations? This is where
-you would do it. Because metal is C++ code, the implementation is look at the 
-UOPS and convert it to C++ strings. 
+Remember the [official guide](https://github.com/tinygrad/tinygrad/blob/master/docs/adding_new_accelerators.md) on adding acclerator says you have to implement 21 required operations? This is where you would do it. Because metal is C++ code, the implementation is look at the UOPS and convert it to C++ strings.
 
-After we have the rendered C++ code, we need to compile it into actual binary
-via the `compile` method:
+After we have the rendered C++ code, we need to compile it into actual binary via the `compile` method:
 
 ```python
 class MetalCompiler(Compiler):
@@ -400,8 +345,7 @@ class MetalCompiler(Compiler):
     return library.libraryDataContents().bytes().tobytes()
 ```
 
-And last, is the program runtime. It receives the compiled bytecode
-and do the actual execution, again this is mostly Metal API specific stuff:
+And last, is the program runtime. It receives the compiled bytecode and do the actual execution, again this is mostly Metal API specific stuff:
 
 ```python
 class MetalProgram:
@@ -428,5 +372,4 @@ class MetalProgram:
     self.device.mtl_buffers_in_flight.append(command_buffer)
 ```
 
-putting them all together is what you see in [ops_metal.py](https://github.com/tinygrad/tinygrad/blob/master/tinygrad/runtime/ops_metal.py)! If you browse other files like ops_cuda.py, you should see that
-they follow a similar pattern.
+putting them all together is what you see in [ops_metal.py](https://github.com/tinygrad/tinygrad/blob/master/tinygrad/runtime/ops_metal.py)! If you browse other files like ops_cuda.py, you should see that they follow a similar pattern.

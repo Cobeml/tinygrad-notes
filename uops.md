@@ -1,15 +1,8 @@
 # Kernel Fusion part 3: the linear layer UOps
 
-In my [high level overview of kernel fusion](dotproduct.md) and the
-[schedule item](scheduleitem.md) post, I discussed the three
-layers of abstraction in generating a kernel: ScheduleItem, Uops and
-the final kernel code and gave a detailed explanation of how ScheduleItem
-is generated. Let me discuss the next layer regarding how ScheduleItem is
-turned into a linear representation (Uops) of all the operations that need to
-be performed, and their optimzation. 
+In my [high level overview of kernel fusion](dotproduct.md) and the [schedule item](scheduleitem.md) post, I discussed the three layers of abstraction in generating a kernel: ScheduleItem, Uops and the final kernel code and gave a detailed explanation of how ScheduleItem is generated. Let me discuss the next layer regarding how ScheduleItem is turned into a linear representation (Uops) of all the operations that need to be performed, and their optimzation.
 
-Recall that a dot product operation will output this ScheduleItem to be converted
-to kernel code:
+Recall that a dot product operation will output this ScheduleItem to be converted to kernel code:
 
 ```
   0 ━┳ STORE MemBuffer(idx=0, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(1,), strides=(0,), offset=0, mask=None, contiguous=True),)))
@@ -19,8 +12,7 @@ to kernel code:
   4      ┗━━ LOAD MemBuffer(idx=2, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(2,), strides=(1,), offset=0, mask=None, contiguous=True),)))
 ```
 
-Remember that the above AST looking tree is the "ScheduleItem" we I discussed
-in the last post, and it gets converted into the following in the next step:
+Remember that the above AST looking tree is the "ScheduleItem" we I discussed in the last post, and it gets converted into the following in the next step:
 
 ```
 step  Op_name               type                      input                           arg
@@ -50,10 +42,7 @@ The journey starts from the `corealize` method in the Tensor class
     run_schedule(create_schedule(flatten([x.lazydata.lbs if isinstance(x.lazydata, MultiLazyBuffer) else [x.lazydata] for x in lst])))
 ```
 
-We take the created ScheduleItem (discussed in [this post](scheduleitem.md)) and 
-call the `run_schedule` function, which invokes `prg = lower_schedule_item(si)`,
-within which if the item has a `STORE` operation at the top level it starts the
-process of converting ScheduleItem to Uops via the `get_runner` method.
+We take the created ScheduleItem (discussed in [this post](scheduleitem.md)) and call the `run_schedule` function, which invokes `prg = lower_schedule_item(si)`, within which if the item has a `STORE` operation at the top level it starts the process of converting ScheduleItem to Uops via the `get_runner` method.
 
 ```python
   if si.ast[0].op is BufferOps.STORE: return Device[si.outputs[0].device].get_runner(*si.ast)
@@ -65,12 +54,7 @@ Inside `get_runner`, it initialize a linearizer and call a to_program method (`*
   def get_runner(self, *ast:LazyOp) -> CompiledASTRunner: return self.to_program(self.get_linearizer(*ast))
 ```
 
-The Linearizer class is what's responsible for converting an AST (ScheduleItem) to
-linear operations, hence its name. Inside it we see a condtion check for the 
-`NOOPT` env variable, and that's where things diverge depending on whether you have
-optimization set up. We will assume the NOOPT is set to true for now so we don't 
-go in there. Spoiler though, inside the if block, it sets up certain flags for the
-optimization, rather than performing them directly.
+The Linearizer class is what's responsible for converting an AST (ScheduleItem) to linear operations, hence its name. Inside it we see a condtion check for the `NOOPT` env variable, and that's where things diverge depending on whether you have optimization set up. We will assume the NOOPT is set to true for now so we don't go in there. Spoiler though, inside the if block, it sets up certain flags for the optimization, rather than performing them directly.
 
 ```python
     if not NOOPT:
@@ -86,27 +70,22 @@ You will also see a check for the `DEBUG` variable:
 
 This is actually what prints out the scheduleitem or AST we saw above.
 
-Overall, it initialize an object with some default settings, and is passed to
-the `to_program` method.
+Overall, it initialize an object with some default settings, and is passed to the `to_program` method.
 
-`to_program` calls two important methods, first is the `linearize` method,
-this is where the process of converting things actually happens
+`to_program` calls two important methods, first is the `linearize` method, this is where the process of converting things actually happens
 
 ```python
     k.linearize()
 ```
 
-Next thing `to-program` does is set up the actual code generator and facility to
-run it:
+Next thing `to-program` does is set up the actual code generator and facility to run it:
 
 ```python
     ret = CompiledASTRunner(k.name, self.compiler.render(to_function_name(k.name), k.uops), self.dname, k.global_size, k.local_size,
                             k.uops.vars(), min(info.flops, ops * run_count), min(info.mem_estimate, mem * run_count), outcount=len(k.outbufs))
 ```
 
-You can see the `self.compiler.render()` is what generates the actual code, and
-`CompiledASTRunner` takes that code and expose an `exec` method so they can be
-executed on GPU.
+You can see the `self.compiler.render()` is what generates the actual code, and `CompiledASTRunner` takes that code and expose an `exec` method so they can be executed on GPU.
 
 I will focus on the `linearize()` method in this post:
 
@@ -114,11 +93,7 @@ I will focus on the `linearize()` method in this post:
   def linearize(self):
 ```
 
-It's actually a very long function. An important property to keep an eye on
-is the `uops` attribute on the Linearizer instance, This attribute contains a list
-of, you guessed it, Uops, which is what we saw earlier when I printedd the entire
-UOps list. So by looking at when and where items are added to the list, we can 
-make sense of how the process works.
+It's actually a very long function. An important property to keep an eye on is the `uops` attribute on the Linearizer instance, This attribute contains a list of, you guessed it, Uops, which is what we saw earlier when I printedd the entire UOps list. So by looking at when and where items are added to the list, we can make sense of how the process works.
 
 This is where `self.uops` is initialized:
 
@@ -134,9 +109,7 @@ And this is an example where items are appended:
                                          (buf.idx, f"data{buf.idx}", any(buf.idx == x.idx for x in self.outbufs)))
 ```
 
-The above calls the `add` method on UOpGraph, and add a `DEFINE_GLOBAL` uop with
-dtype set to the buffer's data type, with zero input, argument set to the
-index. Let's briefly look at the implementation of the `add` method:
+The above calls the `add` method on UOpGraph, and add a `DEFINE_GLOBAL` uop with dtype set to the buffer's data type, with zero input, argument set to the index. Let's briefly look at the implementation of the `add` method:
 
 ```python
   def add(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None, cachable=True, insert_before=None,
@@ -154,16 +127,11 @@ index. Let's briefly look at the implementation of the `add` method:
     return ret
 ```
 
-You see that it construct the UOp as a plain class instance, and set up some caches,
-afterwards it just does a plain list insert `self.uops.insert(insert_before, ret)`.
+You see that it construct the UOp as a plain class instance, and set up some caches, afterwards it just does a plain list insert `self.uops.insert(insert_before, ret)`.
 
-So by adding a breakpoint on the `add` method, I managed to figure out exactly when
-a uop is added. Now think about conceptually, how would you turn the AST into
-linear form? 
+So by adding a breakpoint on the `add` method, I managed to figure out exactly when a uop is added. Now think about conceptually, how would you turn the AST into linear form?
 
-Step 1 is to initialize variables that will be used in the kernel, we must have
-an output pointer passed to the argument, and for any input, we also need to have
-them as arguments passed. So if we have a kernel function like this
+Step 1 is to initialize variables that will be used in the kernel, we must have an output pointer passed to the argument, and for any input, we also need to have them as arguments passed. So if we have a kernel function like this
 
 ```
 (int* data0, int* data1, int* data2) {
@@ -189,10 +157,9 @@ We need to have three `DEFINE_GLOBALS`, that's exactly what happens
 In our case, it has three items:
 <img src="images/image6.png">
 
-The first membuffer is the output data pointer, the other two are the two list we are operating the dot product operation on. They came from the scheduleitem that I covered in details in my last post. 
+The first membuffer is the output data pointer, the other two are the two list we are operating the dot product operation on. They came from the scheduleitem that I covered in details in my last post.
 
-Next after lots of code that didn't take any effect (not in our simple dot product),
-we encounter a reduce set up:
+Next after lots of code that didn't take any effect (not in our simple dot product), we encounter a reduce set up:
 
 ```python
     if self.reduceop is not None:
@@ -208,21 +175,14 @@ we encounter a reduce set up:
       loop_ctx = render_loop(reduce_idxs)
 ```
 
-A reduce op is something that convert multiple elements into one, for example, our 
-SUM operation. `reduce_idxs` contains one element, a Variable that ranges from 0
-to 1. I will cover what a `Variable` is in a separate post, but for now, think
-of it as a regular integer but with some special methods. Conceptually, if we want 
-to reduce a list of element into a single one, we need an accumulator and then
-run a loop on our list, this is in fact what happens at this stage (before any
-optimization).
+A reduce op is something that convert multiple elements into one, for example, our SUM operation. `reduce_idxs` contains one element, a Variable that ranges from 0 to 1. I will cover what a `Variable` is in a separate post, but for now, think of it as a regular integer but with some special methods. Conceptually, if we want to reduce a list of element into a single one, we need an accumulator and then run a loop on our list, this is in fact what happens at this stage (before any optimization).
 
 We first define an accumulator by calling global_load:
 ```python
       acc = self.global_load(out_buf, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, self.get_reduce_acc(self.reduceop))
 ```
 
-`global_load` is a complicated function, but in this case, just the following line
-has effect:
+`global_load` is a complicated function, but in this case, just the following line has effect:
 
 ```python
           self.load_cache[key] = self.uops.add(UOps.DEFINE_ACC, localtype, (), dtypes.as_const(this_const, localtype), cachable=False)
@@ -245,20 +205,15 @@ render_loop is defined as such:
       return tuple(new_loops.values())
 ```
 
-The key to it is that for the reduce operation we have, we append a LOOP 
-uop to the uops list. The loop will have a termination, which is set to the max
-value of our reduce op plus 1.
+The key to it is that for the reduce operation we have, we append a LOOP uop to the uops list. The loop will have a termination, which is set to the max value of our reduce op plus 1.
 
-We then iterate through the `.earlybufs` property to set up a variable that
-contains the buffers before any reduce operation is performed. The .earlybufs
-is initialized like this
+We then iterate through the `.earlybufs` property to set up a variable that contains the buffers before any reduce operation is performed. The .earlybufs is initialized like this
 
 ```python
     self.earlybufs = [x.arg for x in self.reduceop.lazyops if x.op in BufferOps] if self.reduceop else []
 ```
 
-Then we parse the entire AST for the reduce part (SUM) and fill in the remaining
-uops within the loop:
+Then we parse the entire AST for the reduce part (SUM) and fill in the remaining uops within the loop:
 
 ```python
         self.ast_parse(self.reduceop, acc, self.acc_offsets(self.full_buf_index), loaded_buffers, do_reduce=True, loop_ctx=loop_ctx)
@@ -270,11 +225,7 @@ Let's look at what ast_parse does:
   def ast_parse(self, x:LazyOp, acc: List[UOp], offs:Optional[List[int]], loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]], do_reduce=False, loop_ctx=tuple(), cache=None) -> List[UOp]:  # noqa: E501
 ```
 
-x is our SUM op, acc is the DEFINE_ACC we have set up, offs is zero (which I didn't cover, but being 
-zero means we operate on the input without any offset). `loaded_buffers` derives from
-`.earlybufs` with some modification, but essentially means the available data our
-loop can access -- put into context, they are the two tensor we are applying dot
-product operation on and then summing the elements. 
+x is our SUM op, acc is the DEFINE_ACC we have set up, offs is zero (which I didn't cover, but being zero means we operate on the input without any offset). `loaded_buffers` derives from `.earlybufs` with some modification, but essentially means the available data our loop can access -- put into context, they are the two tensor we are applying dot product operation on and then summing the elements.
 
 We see that it goes into the `.src` and perform a recursion:
 
@@ -291,8 +242,7 @@ Recall our AST looks like this:
   4      ┗━━ LOAD MemBuffer(idx=2, dtype=dtypes.int, st=ShapeTracker(views=(View(shape=(2,), strides=(1,), offset=0, mask=None, contiguous=True),)))
   ```
 
-The .src of the SUM node is MUL, whose `.src` are the two LOAD op, so the recursion's
-base case terminates upon the loading of the two membuffers, which are our input list:
+The .src of the SUM node is MUL, whose `.src` are the two LOAD op, so the recursion's base case terminates upon the loading of the two membuffers, which are our input list:
 
 ```python
     if x.op in BufferOps: return loaded_buffers[x.arg]
@@ -307,10 +257,7 @@ And the MUL operation is constructed:
 which results in:
 <img src="images/image7.png">
 
-The above read: append a ALU operation (arithmetic logic unit) to the linear ops list,
-this op's type is the same as input type, and the val is each element in the LOAD buffer,
-with the specific op type being MUL (x.op). In summary, that's how you would express
-the following multiplication operation in linear op format:
+The above read: append a ALU operation (arithmetic logic unit) to the linear ops list, this op's type is the same as input type, and the val is each element in the LOAD buffer, with the specific op type being MUL (x.op). In summary, that's how you would express the following multiplication operation in linear op format:
 
 ```c++
     int val0 = *(data1+ridx0);
@@ -333,13 +280,9 @@ And finally we return back to the SUM callstack and execute this line:
 
 ```
 
-The first loop add all the input from our MUL recursion together by doing `self.uops.add(UOps.ALU)`,
-and the second loop relates to single static assignment and constructs a PHI op.
-I don't understand it 100% so I will just recommend you look up the concept on 
-Google (a good example is LLVM).
+The first loop add all the input from our MUL recursion together by doing `self.uops.add(UOps.ALU)`, and the second loop relates to single static assignment and constructs a PHI op. I don't understand it 100% so I will just recommend you look up the concept on Google (a good example is LLVM).
 
-The remaining part is more or less the same as before, but for all the
-remaining operation after the SUM part (which we actually don't have any)
+The remaining part is more or less the same as before, but for all the remaining operation after the SUM part (which we actually don't have any)
 
 ```python
     loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs) \

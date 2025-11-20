@@ -1,11 +1,8 @@
 # Explaining the symbolic mean bounty
 
-You can check out commit f3de17912f45cf7e45aa2004a0087346fd5fc54a
-to experiment with how things are before the implementation.
+You can check out commit f3de17912f45cf7e45aa2004a0087346fd5fc54a to experiment with how things are before the implementation.
 
-The bounty is to add support for calculating the mean of a tensor (across
-a certain dimension) using symbolic variable. To understand what that means,
-let's look at a relevant example. The scrip below sums up a tensor:
+The bounty is to add support for calculating the mean of a tensor (across a certain dimension) using symbolic variable. To understand what that means, let's look at a relevant example. The scrip below sums up a tensor:
 
 ```python
 from tinygrad import Tensor
@@ -14,8 +11,7 @@ b = a.sum()
 print(b.numpy())
 ```
 
-We can run this with `DEBUG=5 python script.py` and see the generated kernel
-code:
+We can run this with `DEBUG=5 python script.py` and see the generated kernel code:
 
 ```c++
 #include <metal_stdlib>
@@ -30,8 +26,7 @@ kernel void r_4(device int* data0, const device int* data1, uint3 gid [[threadgr
 }
 ```
 
-There's nothing too interesting here, but suppose now we are doing the sum
-operation on two different tensors:
+There's nothing too interesting here, but suppose now we are doing the sum operation on two different tensors:
 
 ```python
 from tinygrad import Tensor
@@ -62,13 +57,7 @@ kernel void r_8(device int* data0, const device int* data1, uint3 gid [[threadgr
 }
 ```
 
-The downside of having two kernels is that the compilation has to be done
-twice, once for each kernel. Although we can already tell that the two tensors
-are quite similar, and in theory, we should have some way of reusing the same
-compilation result for both tensors's sum operation. That's where symbolic 
-comes to play. We can initialize a tensor with a symbolic shape, and
-bind the value to it, such that the compilation has to be done only once and
-cached:
+The downside of having two kernels is that the compilation has to be done twice, once for each kernel. Although we can already tell that the two tensors are quite similar, and in theory, we should have some way of reusing the same compilation result for both tensors's sum operation. That's where symbolic comes to play. We can initialize a tensor with a symbolic shape, and bind the value to it, such that the compilation has to be done only once and cached:
 
 ```python
 from tinygrad import Tensor
@@ -86,13 +75,7 @@ d = c.sum()
 print(d.numpy())
 ```
 
-A little bit of explanation might help. `length` is a special object
-of type Variable, it serves as a placeholder for a range of values, in which 
-case we put 4 and 8, meaning it can represent numbers 4, 5, 6, 7, and 8. When
-we create a tensor of shape `length`, we have to assign a value to it, such that
-the sum can get concrete values for the operation. After that, when we want to 
-assign a different value, we have to unbind it first, then re-bind, in which
-case we assign value 8 and used it to create a tensor of length 8.
+A little bit of explanation might help. `length` is a special object of type Variable, it serves as a placeholder for a range of values, in which case we put 4 and 8, meaning it can represent numbers 4, 5, 6, 7, and 8. When we create a tensor of shape `length`, we have to assign a value to it, such that the sum can get concrete values for the operation. After that, when we want to assign a different value, we have to unbind it first, then re-bind, in which case we assign value 8 and used it to create a tensor of length 8.
 
 If you run the script again, you should see just one kernel, instead of two:
 
@@ -109,18 +92,9 @@ kernel void r_3Clength5B42D85D3E(device float* data0, const device float* data1,
 }
 ```
 
-There are two things interesting here. First, there's only one kernel, meaning
-we only did the compilation once, cached it and re-used it when we sum the 
-second tensor. Second, the kernel itself can serve tensors that has different
-lengths, which allows us to use just one kernel.
+There are two things interesting here. First, there's only one kernel, meaning we only did the compilation once, cached it and re-used it when we sum the second tensor. Second, the kernel itself can serve tensors that has different lengths, which allows us to use just one kernel.
 
-The way this kernel works is by having an additional parameter: `constant int& length`
-whose value is passed in when this kernel is dispatched. You see that in the loop,
-it uses  `ridx0 < length` to bound the iteration, which allows it to work for any
-length. Normally, when we dispatch a kernel, we are passing the data pointer for 
-its input buffer, but here you can see that we can also pass in the special
-value for the tensor's length. Things become clearer if you look at the IR Uops
-that was generated:
+The way this kernel works is by having an additional parameter: `constant int& length` whose value is passed in when this kernel is dispatched. You see that in the loop, it uses  `ridx0 < length` to bound the iteration, which allows it to work for any length. Normally, when we dispatch a kernel, we are passing the data pointer for its input buffer, but here you can see that we can also pass in the special value for the tensor's length. Things become clearer if you look at the IR Uops that was generated:
 
 ```
    0 UOps.DEFINE_GLOBAL  : ptr.dtypes.float          []                               (0, 'data0', True)
@@ -136,16 +110,9 @@ that was generated:
   10 UOps.STORE          :                           [0, 4, 8]                        None
 ```
 
-We have a `DEFINE_VAR` and the `LOOP` op uses it as the input, that's how
-symbolic variable works in action. The actual implementaion is in this
-older [PR](https://github.com/tinygrad/tinygrad/pull/1552).
+We have a `DEFINE_VAR` and the `LOOP` op uses it as the input, that's how symbolic variable works in action. The actual implementaion is in this older [PR](https://github.com/tinygrad/tinygrad/pull/1552).
 
-Now back to the bounty question, can we do the same for mean? You can
-try this script and you will get an error (note that I am running 
-against commit id f3de17912f45cf7e45aa2004a0087346fd5fc54a) and
-I used the `div` method directly to calculate the mean
-because the `mean()` method has some asserts that prevent you from
-trying this out at all:
+Now back to the bounty question, can we do the same for mean? You can try this script and you will get an error (note that I am running against commit id f3de17912f45cf7e45aa2004a0087346fd5fc54a) and I used the `div` method directly to calculate the mean because the `mean()` method has some asserts that prevent you from trying this out at all:
 
 ```python
 from tinygrad import Tensor
@@ -160,9 +127,7 @@ print(c.numpy())
 
 <img src="images/img50.png">
 
-The error message says you can't create a tensor using symbolic value. Tracing
-the code, we see that the divison operator will attempt to create a tensor
-for any non-tensor operand via the `_broadcasted` method:
+The error message says you can't create a tensor using symbolic value. Tracing the code, we see that the divison operator will attempt to create a tensor for any non-tensor operand via the `_broadcasted` method:
 
 ```python
 class Tensor:
@@ -191,16 +156,10 @@ class Tensor:
     return x._broadcast_to(out_shape), y._broadcast_to(out_shape)
 ```
 
-If you ponder about why `sum` works and `mean` doesn't, it's because summing
-things up does not introduce new variables, it's just adding the values
-within itself. However, calculating the mean requires you to divide the sum
-by a new value, and this new value has to be of type tensor. Similarly, 
-you can see that `max` and `min` also work, whereas `std` and `var` do not.
-The goal of the bounty is now clear - allow Tensor to accept symbolic values.
+If you ponder about why `sum` works and `mean` doesn't, it's because summing things up does not introduce new variables, it's just adding the values within itself. However, calculating the mean requires you to divide the sum by a new value, and this new value has to be of type tensor. Similarly, you can see that `max` and `min` also work, whereas `std` and `var` do not. The goal of the bounty is now clear - allow Tensor to accept symbolic values.
 
 
-Let's look at where to get started, aka where the error was thrown, when you create a 
-tensor, its initializer checks the data type:
+Let's look at where to get started, aka where the error was thrown, when you create a tensor, its initializer checks the data type:
 
 ```python
     if isinstance(data, LazyBuffer): assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
@@ -213,8 +172,6 @@ tensor, its initializer checks the data type:
       self.lazydata = data if data.device == device else data.copy_to_device(device)
 ```
 
-The starting point would be to make this initializer accept `Variable` and have 
-downstream operations to recognize this datatype.
+The starting point would be to make this initializer accept `Variable` and have downstream operations to recognize this datatype.
 
-Feel free to now take a look at the PR that implemented it and hopefully
-it become clear what it accomplished: https://github.com/tinygrad/tinygrad/pull/4362
+Feel free to now take a look at the PR that implemented it and hopefully it become clear what it accomplished: https://github.com/tinygrad/tinygrad/pull/4362

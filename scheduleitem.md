@@ -2,10 +2,7 @@
 
 ## Why sometimes there are more than one kernel
 
-In my writeup for the [dot product example](dotproduct.md), we saw
-that the whole thing is fused into a single kernel, this isn't always the
-case. There are certain rules that govern how a kernel is created and 
-where it ends. These are called "schedule items".
+In my writeup for the [dot product example](dotproduct.md), we saw that the whole thing is fused into a single kernel, this isn't always the case. There are certain rules that govern how a kernel is created and where it ends. These are called "schedule items".
 
 ```python
 from tinygrad.tensor import Tensor
@@ -14,38 +11,21 @@ b = Tensor([3,4])
 c = a.dot(b)
 ```
 
-In the above example, I used some debugger tool to see the structure of variable
-c. 
+In the above example, I used some debugger tool to see the structure of variable c.
 
 <img src="images/image0.png">
 
-On the top level, there's a lazydata attribute. It represent what kind of data
-this should hold, but not yet evaluated. This attribute is an instance of the 
-corresponding LazyData class. And there are two types of it, which I term
-concrete data and non-concrete data. Concrete lazy data are those that has
-an operation, for example, when you add two tensor, the output tensor is a concrete
-lazydata that has a "SUM" operation. The non-concrete lazydata are those that
-do not have such operation, and are used to wrap a concrete lazydata, such that
-shape operation like permute and reshape can be represented. For non-concrete
-lazydata, there's a `_base` attribute that points to a concrete lazydata. And
-for consistent API usage, both types of lazydata has a `base` attribute. If it's a
-concrete lazydata, the base refers to itself, and if it's a non-concrete one, base
-returns what `_base` points to:
+On the top level, there's a lazydata attribute. It represent what kind of data this should hold, but not yet evaluated. This attribute is an instance of the corresponding LazyData class. And there are two types of it, which I term concrete data and non-concrete data. Concrete lazy data are those that has an operation, for example, when you add two tensor, the output tensor is a concrete lazydata that has a "SUM" operation. The non-concrete lazydata are those that do not have such operation, and are used to wrap a concrete lazydata, such that shape operation like permute and reshape can be represented. For non-concrete lazydata, there's a `_base` attribute that points to a concrete lazydata. And for consistent API usage, both types of lazydata has a `base` attribute. If it's a concrete lazydata, the base refers to itself, and if it's a non-concrete one, base returns what `_base` points to:
 
 ```python
   @property
   def base(self) -> LazyBuffer: return self._base if self._base is not None else self
 ```
 
-So our c variable's lazydata is a non-concrete one, and its _base attribute points
-to another instance that has the attribute called `op` with the value SUM, *as it was written*.
+So our c variable's lazydata is a non-concrete one, and its _base attribute points to another instance that has the attribute called `op` with the value SUM, *as it was written*.
 <img src="images/image1.png">
 
-The reason there's a non-concrete lazydata on top of the SUM instance is because
-of additional shape operations on it, you can see that the `st` variable is filled
-with views information on both non-concrete and concrete instance, but the details
-will be discussed later. For how views work, refer to the [shapetracker post](shapetracker.md)
-and [merge dimension post](mergedim.md).
+The reason there's a non-concrete lazydata on top of the SUM instance is because of additional shape operations on it, you can see that the `st` variable is filled with views information on both non-concrete and concrete instance, but the details will be discussed later. For how views work, refer to the [shapetracker post](shapetracker.md) and [merge dimension post](mergedim.md).
 
 If we unpack the whole thing, the relation roughly resembles the below:
 
@@ -88,9 +68,7 @@ c {
 }
 ```
 
-Try matching the python code to the structure above. The two "EXT" at the end
-are the two list we have provided, and they are being first multiplied, and then
-summed, producing the final input. 
+Try matching the python code to the structure above. The two "EXT" at the end are the two list we have provided, and they are being first multiplied, and then summed, producing the final input.
 
 Recall that the generated kernel code looks like below:
 ```
@@ -107,40 +85,17 @@ kernel void r_2(device int* data0, const device int* data1, const device int* da
 }
 ```
 
-Now conceptually, if we want to run this code, we have to make sure data1 and
-data2 pointer actually refers to something that has data, and the data comes from
-our python memory, which is absent in the GPU. So before we run the kernel code,
-we have to do two operations, to load the two list into GPU memory. Tinygrad
-abstract this into something called `ScheduleItem` and it essentially represent
-a single kernel operation, which could be either loading memory into GPU, running
-code in GPU, or reading from GPU. Looking at our lazydata tree, we can see that 
-there are three schedule item that need to be created - load data * 2, run code.
-If you trace through what happens in the `numpy()` method (which evaluates the
-data by running them on GPU), there's a statement inside `run_schedule` function,
-put a breakpoint at the `while len(schedule)` and see what the variable contains
-upon running the code <img src="images/image2.png">
+Now conceptually, if we want to run this code, we have to make sure data1 and data2 pointer actually refers to something that has data, and the data comes from our python memory, which is absent in the GPU. So before we run the kernel code, we have to do two operations, to load the two list into GPU memory. Tinygrad abstract this into something called `ScheduleItem` and it essentially represent a single kernel operation, which could be either loading memory into GPU, running code in GPU, or reading from GPU. Looking at our lazydata tree, we can see that there are three schedule item that need to be created - load data * 2, run code. If you trace through what happens in the `numpy()` method (which evaluates the data by running them on GPU), there's a statement inside `run_schedule` function, put a breakpoint at the `while len(schedule)` and see what the variable contains upon running the code <img src="images/image2.png">
 
 ,exactly 3 items, *as it was written*.
 
-How are these three items generated? Essentially we run some function that goes 
-through the entire lazydata tree, parse them into AST and buffers and depending
-on encoded rules, we split them into multiple schedule items as needed. The function
-is called `create_schedule` and it takes a list of lazydata, in our case, just
-one lazydata that branches all the way down to the EMPTY op. 
+How are these three items generated? Essentially we run some function that goes through the entire lazydata tree, parse them into AST and buffers and depending on encoded rules, we split them into multiple schedule items as needed. The function is called `create_schedule` and it takes a list of lazydata, in our case, just one lazydata that branches all the way down to the EMPTY op.
 
 ```python
 def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> List[ScheduleItem]:
 ```
 
-The first step to create schedule is to figure out which of the lazydata need
-to be realized. What that means is which of them should be allocated memory in the
-GPU. The first obvious ones are the top level SUM lazydata, and the two trailing
-one that represents the two list. That's what create_schedule does, it constructs
-a `realizes` list, add the top level one to it, and call `recurse_lb` which walks
-the entire lazydata tree and find the one that has the `realize` attribute set. 
-Recall that the lazydata for our two lists are represented in memory and hence
-have the `realize` attribute set as a Buffer object (I didn't cover how lazy
-data is constructed yet, so just take that for granted).
+The first step to create schedule is to figure out which of the lazydata need to be realized. What that means is which of them should be allocated memory in the GPU. The first obvious ones are the top level SUM lazydata, and the two trailing one that represents the two list. That's what create_schedule does, it constructs a `realizes` list, add the top level one to it, and call `recurse_lb` which walks the entire lazydata tree and find the one that has the `realize` attribute set. Recall that the lazydata for our two lists are represented in memory and hence have the `realize` attribute set as a Buffer object (I didn't cover how lazy data is constructed yet, so just take that for granted).
 
 ```python
   realizes: Set[LazyBuffer] = set([x.base for x in outs if not x.base.realized])
@@ -177,8 +132,7 @@ def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffe
     _recurse_lb(x, realizes, allbufs, simple_pads, children)
 ```
 
-Next step we iterates through each element in the `realizes` list and construct
-schedule item 
+Next step we iterates through each element in the `realizes` list and construct schedule item
 
 ```python
 prescheduled = {x:_schedule_one(x, realizes, reduce_for_op) for x in realizes if x not in seen and x.realized is None and x.op is not LoadOps.CONST}
@@ -199,14 +153,9 @@ def _schedule_one(out:LazyBuffer, realizes:Set[LazyBuffer], reduce_for_op: Dict[
   return ScheduleItem((op,), (out,), tuple(inputs), var_vals)
 ```
 
-You can see that the `ScheduleItem` is actually being constructed, and also note
-that if the output lazydata is not one of the memory loaded operation, we append
-a `STORE` operation on top, indicating that we want to retain the value after GPU
-computation.
+You can see that the `ScheduleItem` is actually being constructed, and also note that if the output lazydata is not one of the memory loaded operation, we append a `STORE` operation on top, indicating that we want to retain the value after GPU computation.
 
-In this simple example, we saw that a single kernel is generated because 
-everything fits together nicely. What happens for a more complex operation? 
-Let's say we want to calculate the variance of a list.
+In this simple example, we saw that a single kernel is generated because everything fits together nicely. What happens for a more complex operation? Let's say we want to calculate the variance of a list.
 
 ```python
 a = Tensor([1,2,3,4])
@@ -214,16 +163,13 @@ b = a.var()
 print(b.numpy()) # --> 1.6666667
 ```
 
-Recall that the formula is to first get the average: 0.25 * (1 + 2 + 3 + 4) = 2.5
-Then iteratively calculate the difference of each element w.r.t. the average
-and square and sum it
+Recall that the formula is to first get the average: 0.25 * (1 + 2 + 3 + 4) = 2.5 Then iteratively calculate the difference of each element w.r.t. the average and square and sum it
 ```
 ((1 - 2.5)^2 + (2 - 2.5)^2 + (3 - 2.5)^2 + (4 - 2.5)^2) / 3 = 1.667
 
 ```
 
-If you save it in a script.py and run it with `NOOPT=1 DEBUG=5 python script.py`
-(disabling optimization so we don't overwhelm ourselves), you see that two kernel codes are generated
+If you save it in a script.py and run it with `NOOPT=1 DEBUG=5 python script.py` (disabling optimization so we don't overwhelm ourselves), you see that two kernel codes are generated
 
 ```c++
 kernel void r_4(device float* data0, const device int* data1, uint3 gid [[threadgroup_position_in_grid]], uint3 lid [[thread_position_in_threadgroup]]) {
@@ -248,18 +194,11 @@ kernel void r_4n1(device float* data0, const device int* data1, const device flo
 
 ```
 
-The first one calculates the average, the second one calculate the actual variance.
-Let's explore why there are two kernels and see if we can find ways to optimize it
-into a single one (that's actually one of the bounty). We can do the same debugger
-breakpoint and see how many scheduleitems are generated <img src='images/image3.png'>
+The first one calculates the average, the second one calculate the actual variance. Let's explore why there are two kernels and see if we can find ways to optimize it into a single one (that's actually one of the bounty). We can do the same debugger breakpoint and see how many scheduleitems are generated <img src='images/image3.png'>
 
-Three, the first one is a `COPY`/`EMPTY` op, indicating the initial four elements
-we have as input. The second and third are two STORE op, corresponding to the two
-kernels. 
+Three, the first one is a `COPY`/`EMPTY` op, indicating the initial four elements we have as input. The second and third are two STORE op, corresponding to the two kernels.
 
-I want to first dissect the structure of the tensor returned after calling a.var(), 
-specifically, the lazydata tree. Before looking at the actual tree, let's look
-at an imaginary one to get terminology right:
+I want to first dissect the structure of the tensor returned after calling a.var(), specifically, the lazydata tree. Before looking at the actual tree, let's look at an imaginary one to get terminology right:
 
 
 ```
@@ -280,36 +219,19 @@ at an imaginary one to get terminology right:
 }
 ```
 
-The important three key attr in a tree are 1) srcs, which has a list of lazydata; 2) op, indicating
-the operation; 3) and _base, indicating whether this is a concrete lazydata or 
-just a pointer. 
+The important three key attr in a tree are 1) srcs, which has a list of lazydata; 2) op, indicating the operation; 3) and _base, indicating whether this is a concrete lazydata or just a pointer.
 
-The full tree for our variance calculation looks like the daunting chart below, but
-I'll break it down
+The full tree for our variance calculation looks like the daunting chart below, but I'll break it down
 
 <img src="images/image4.png">
 
-The text in each box has two part, the letters represent the operation, for example,
-SUM, MUL, etc. The number are just labels I put in so I can refer to them (they
-don't exist in the source code or the actual object). The arrow indicate the `srcs`, 
-so if a box ("MUL 1") has an arrow pointing it to the object below ("LB 2" and "CONST 17")
-that means the lazydata MUL has an src containing two lazydata ("LB 2" and "CONST 17).
-The word "LB" indicate a non-concrete data, and the box that's below it immediately
-is the the `_base` attribute points to.
+The text in each box has two part, the letters represent the operation, for example, SUM, MUL, etc. The number are just labels I put in so I can refer to them (they don't exist in the source code or the actual object). The arrow indicate the `srcs`, so if a box ("MUL 1") has an arrow pointing it to the object below ("LB 2" and "CONST 17") that means the lazydata MUL has an src containing two lazydata ("LB 2" and "CONST 17). The word "LB" indicate a non-concrete data, and the box that's below it immediately is the the `_base` attribute points to.
 
-You may notice that the two tree that branches from "MUL 4" are identical, and indeed,
-the two trees are the same instance, the MUL is indeed the square operation. "SUB 5"
-is the subtraction between the current X and the average. I'll next simplify the
-graph and add some labels to show what's the underlying data or operation it's meant
-to represent (correction: "MUL 10" has two srcs: "CAST 11" and "LB 15", the line
-was misdrawn).
+You may notice that the two tree that branches from "MUL 4" are identical, and indeed, the two trees are the same instance, the MUL is indeed the square operation. "SUB 5" is the subtraction between the current X and the average. I'll next simplify the graph and add some labels to show what's the underlying data or operation it's meant to represent (correction: "MUL 10" has two srcs: "CAST 11" and "LB 15", the line was misdrawn).
 
-<img src="images/image5.png">. 
+<img src="images/image5.png">.
 
-Looking at it, you might wonder why this lazydata tree would end up generating
-two kernels, and the answer lies in how it's being handled by `create_schedule`.
-I would recomment printing out the entire tree above and walk through the operations. 
-But here's the breakdown.
+Looking at it, you might wonder why this lazydata tree would end up generating two kernels, and the answer lies in how it's being handled by `create_schedule`. I would recomment printing out the entire tree above and walk through the operations. But here's the breakdown.
 
 After the `_recurse_lb` loop, we have a few variables populated:
 
@@ -323,11 +245,7 @@ After the `_recurse_lb` loop, we have a few variables populated:
     _recurse_lb(out.base, realizes, allbufs, simple_pads, children, scheduled=True)
 ```
 
-`realizes` contains six lazydata, added in the order: "MUL 1", "COPY 7",
-"EXT 8", "CONST 7", "MUL 10", "CONST 16". `allbufs` are just used as a deduplication
-mechanism, because if you recall our first version of the lazydata tree, there
-were two identical tree, `allbufs` is used to stop the search if it encounters the
-same instance. The rest I will ignore for now.
+`realizes` contains six lazydata, added in the order: "MUL 1", "COPY 7", "EXT 8", "CONST 7", "MUL 10", "CONST 16". `allbufs` are just used as a deduplication mechanism, because if you recall our first version of the lazydata tree, there were two identical tree, `allbufs` is used to stop the search if it encounters the same instance. The rest I will ignore for now.
 
 `realizes` is what's directly used to generate the schedule item:
 
@@ -336,13 +254,9 @@ same instance. The rest I will ignore for now.
 
 ```
 
-We see that if an item is in realizes, it forms a schedule item. Within the `_schedule_one`, 
-we saw that there's a branch that decides what kind of scheduleitem you have, specifically,
-do you have to STORE or it's just a buffer operation? A STORE operation forms a kernel,
-a buffer operation means moving data from and to GPU. Let me break that down further.
+We see that if an item is in realizes, it forms a schedule item. Within the `_schedule_one`, we saw that there's a branch that decides what kind of scheduleitem you have, specifically, do you have to STORE or it's just a buffer operation? A STORE operation forms a kernel, a buffer operation means moving data from and to GPU. Let me break that down further.
 
-All of ScheduleItem are 
-executed the same way, by calling the `.exec()` method inside `run_schedule`
+All of ScheduleItem are executed the same way, by calling the `.exec()` method inside `run_schedule`
 
 ```python
     if prg: prg.exec(cast(List[Buffer], real_buffers), si.var_vals)
@@ -365,17 +279,13 @@ def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
   return None
 ```
 
-We see that if it's the lazydata starts with a STORE, we call the `get_runner` method
-which then looks up what kind of device you are using, and find the corresponding
-code generator utility, which ultimately calls this, and the rest are about how a single
-lazydata tree that starts with STORE are translated into GPU code.
+We see that if it's the lazydata starts with a STORE, we call the `get_runner` method which then looks up what kind of device you are using, and find the corresponding code generator utility, which ultimately calls this, and the rest are about how a single lazydata tree that starts with STORE are translated into GPU code.
 ```python
 # Inside to_program
 self.compiler.render()
 ```
 
-If it's a Buffer operation (COPY), we return a `BufferCopy()` 
-constructor. 
+If it's a Buffer operation (COPY), we return a `BufferCopy()` constructor.
 
 ```python
 class BufferCopy(JITRunner):
@@ -395,10 +305,7 @@ class BufferCopy(JITRunner):
     update_stats(colored(name, "yellow"), 0, total_sz, {}, et, 2, jit, device=dest.device)
 ```
 
-I will skip some details here, but when you call `.exec()` on BufferCopy and
-you are on a Macbook, 
-the following functions are called, which essentially translates to the how you
-would allocate memory in C++. 
+I will skip some details here, but when you call `.exec()` on BufferCopy and you are on a Macbook, the following functions are called, which essentially translates to the how you would allocate memory in C++.
 
 ```python
   def as_buffer(self, src:Any) -> memoryview:
@@ -408,15 +315,7 @@ would allocate memory in C++.
   def copyout(self, dest:memoryview, src:Any): dest[:] = self.as_buffer(src)
 ```
 
-Anyways, the point I'm trying to illustrate is that the items in your `realizes`
-list are separated into two types of operations that will be run sequentially.
-In our dot product example, that are three ops. In our second case, we end up having 
-six operations, and 2 of them are kernels, 4 of them are memory loading operations.
-Having two lazydata with STORE is the reason we end up fusing two kernels, and
-these two kernels are run one after another, the first calculates the average,
-the second calculates the variance. Where did we do the Depth First Search and
-created this `realizes` list? Inside `_recursve_lb`! And what conditions causes
-it to add something to the list?
+Anyways, the point I'm trying to illustrate is that the items in your `realizes` list are separated into two types of operations that will be run sequentially. In our dot product example, that are three ops. In our second case, we end up having six operations, and 2 of them are kernels, 4 of them are memory loading operations. Having two lazydata with STORE is the reason we end up fusing two kernels, and these two kernels are run one after another, the first calculates the average, the second calculates the variance. Where did we do the Depth First Search and created this `realizes` list? Inside `_recursve_lb`! And what conditions causes it to add something to the list?
 
 ```python
 # 1
@@ -443,21 +342,9 @@ it to add something to the list?
         realizes.add(buf.base)
 ```
 
-So at first glance, only memory related operations are added to `realizes`, then plus the intial
-STORE you put into `realizes` when it was first declared, that's what happened with the
-dot product example. However, in variance example, we encounter #3 and executed
-the `realizes.add(buf.base)`. If you recall the relation between concrete and non-concrete
-lazydata, this conditions check essentially means "if you have a non-concrete lazydata that
-represent some shape related operation on top of a concrete tensor (first if), and
-the concrete lazydata has fewer elements than this non-concrete lazydata (second if),
-and plus some sanity checks (third if, which i don't yet understand), then you have
-to form a new kernel starting from this point in the lazydata tree. Essentially,
-if you have expanded a tensor at some point in your operation, you have to first get a 
-concrete value before doing the expand. 
+So at first glance, only memory related operations are added to `realizes`, then plus the intial STORE you put into `realizes` when it was first declared, that's what happened with the dot product example. However, in variance example, we encounter #3 and executed the `realizes.add(buf.base)`. If you recall the relation between concrete and non-concrete lazydata, this conditions check essentially means "if you have a non-concrete lazydata that represent some shape related operation on top of a concrete tensor (first if), and the concrete lazydata has fewer elements than this non-concrete lazydata (second if), and plus some sanity checks (third if, which i don't yet understand), then you have to form a new kernel starting from this point in the lazydata tree. Essentially, if you have expanded a tensor at some point in your operation, you have to first get a concrete value before doing the expand.
 
-In our variance example, we first calculate
-the average, then we expand the number to the length of our tensor, such that we can
-put that number into the new kernel to calculate things concurrently. Illustrated:
+In our variance example, we first calculate the average, then we expand the number to the length of our tensor, such that we can put that number into the new kernel to calculate things concurrently. Illustrated:
 
 ```
 

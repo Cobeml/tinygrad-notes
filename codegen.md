@@ -34,10 +34,7 @@ kernel void E_(device int* data0, const device int* data1, const device int* dat
 
 # LOAD
 
-a load operation generates this string: `*(data1+0)`. We know that a load
-must have an input referrinng to the data, and the other input referring to
-the pointer position offset. We have just 1 element, so the offset is zero. 
-This is the load renderer:
+a load operation generates this string: `*(data1+0)`. We know that a load must have an input referrinng to the data, and the other input referring to the pointer position offset. We have just 1 element, so the offset is zero. This is the load renderer:
 
 ```python
   def render_load(self, output_dtype, buf_name, buf_dtype, idx, local=False) -> str:
@@ -45,9 +42,7 @@ This is the load renderer:
     return out_val
 ```
 
-`idx` will have a value of zero in this case. What if we have more than 1 
-elements, then `idx` will have a value of 1, 2, 3, etc. But the implementation
-is done via the [[thread_position_in_threadgroup]], so if the input is:
+`idx` will have a value of zero in this case. What if we have more than 1 elements, then `idx` will have a value of 1, 2, 3, etc. But the implementation is done via the [[thread_position_in_threadgroup]], so if the input is:
 
 ```python
 a = Tensor([1, 2, 3])
@@ -56,10 +51,10 @@ c = a + b
 print(c.numpy())
 ```
 
-then idx will have a value of `lidx0`, and the output code is: 
+then idx will have a value of `lidx0`, and the output code is:
 
 ```c++
-kernel void E_2(device int* data0, const device int* data1, const device int* data2, uint3 gid [[threadgroup_position_in_grid]], uint3 lid [[thread_position_in_threadgroup]]) {
+kernel void E_2(device int* data0, device int* data1, device int* data2, uint3 gid [[threadgroup_position_in_grid]], uint3 lid [[thread_position_in_threadgroup]]) {
   int lidx0 = lid.x; /* 2 */
   int val0 = *(data1+lidx0);
   int val1 = *(data2+lidx0);
@@ -81,9 +76,7 @@ with the uops list being:
 
 You see that idx with value zero came from previously the `CONST` op, now it is a `SPECIAL` op.
 
-We know conceptualy idx takes the value from the second input, but when code gen
-encounters the LOAD op, how does it go and grab the value from the input? Inside
-`uops_to_cstyle`:
+We know conceptualy idx takes the value from the second input, but when code gen encounters the LOAD op, how does it go and grab the value from the input? Inside `uops_to_cstyle`:
 
 ```python
       elif uop is UOps.LOAD:
@@ -92,18 +85,11 @@ encounters the LOAD op, how does it go and grab the value from the input? Inside
         val = lang.render_load(dtype, r[vin[0]], vin[0].dtype, r[vin[1]], vin[0].uop is UOps.DEFINE_LOCAL)
 ```
 
-the datainput is straightforward, the uop that maps to the first input: `r[vin[0]]`
-the idx came from here: `r[vin[1]]`. So the "Special" doesn't have any effect here,
-it is literally just grabbing the argument of the op. If it's a CONST op, value
-will be zero, if it's a SPECIAL, value will be "lidx0". You can check the print
-statement and run it yourself.
+the datainput is straightforward, the uop that maps to the first input: `r[vin[0]]` the idx came from here: `r[vin[1]]`. So the "Special" doesn't have any effect here, it is literally just grabbing the argument of the op. If it's a CONST op, value will be zero, if it's a SPECIAL, value will be "lidx0". You can check the print statement and run it yourself.
 
-You may be confused about the r variable, it is initially an empty dictionary,
-and gets populated with content as we iterate through the uops list item one by
-one, among them the CONST and SPECIAL op. 
+You may be confused about the r variable, it is initially an empty dictionary, and gets populated with content as we iterate through the uops list item one by one, among them the CONST and SPECIAL op.
 
-In the single element case, a CONST op is first encountered and gets handled
-as such:
+In the single element case, a CONST op is first encountered and gets handled as such:
 
 ```python
       elif uop is UOps.CONST: 
@@ -120,8 +106,7 @@ with the render_cosnt function being
     return (self.render_cast([val] * dtype.count, dtype) if dtype.count > 1 or dtype not in [dtypes.float, dtypes.int, dtypes.bool] else val)
 ```
 
-which in the most simple case, is just the value being printed either with the 'f'
-suffix or as a plain number. And our dictionary now becomes
+which in the most simple case, is just the value being printed either with the 'f' suffix or as a plain number. And our dictionary now becomes
 
 ```python
 {
@@ -129,7 +114,7 @@ suffix or as a plain number. And our dictionary now becomes
 }
 ```
 
-In the case of the SPECIAL op, 
+In the case of the SPECIAL op,
 
 ```python
       elif uop is UOps.SPECIAL:
@@ -139,17 +124,11 @@ In the case of the SPECIAL op,
 
 with args being `(0, 'lidx0', 2)`.
 
-You can now see where the value of idx came from in render load, it's the input value
-that's being added to the `r` dictionary. If it's a multi element, we use a 
-SPECIAL op to represent the pointer arithmetic, and store the number of thread
-within threadgroup to iterate through the list. If it's a single element,
-we store the value of a CONST directly as input and put it in the `r` dictionary,
-so it renders as `*(data1+0)`.
+You can now see where the value of idx came from in render load, it's the input value that's being added to the `r` dictionary. If it's a multi element, we use a SPECIAL op to represent the pointer arithmetic, and store the number of thread within threadgroup to iterate through the list. If it's a single element, we store the value of a CONST directly as input and put it in the `r` dictionary, so it renders as `*(data1+0)`.
 
 # CAST
 
-another common operation is type casting. We may start off with some integer
-but want the output to be a float.
+another common operation is type casting. We may start off with some integer but want the output to be a float.
 
 ```python
 from tinygrad import Tensor, dtypes
@@ -160,7 +139,7 @@ c = (a + b).cast(dtypes.float32)
 print(c.numpy())
 ```
 
-the metal code is 
+the metal code is
 ```c++
   int lidx0 = lid.x; /* 2 */
   int val0 = *(data1+lidx0);
@@ -168,8 +147,7 @@ the metal code is
   *(data0+lidx0) = (float)((val0+val1));
 ```
 
-THe only change is just the `(float)` part, how is this rendered? Let's see
-uops:
+THe only change is just the `(float)` part, how is this rendered? Let's see uops:
 
 ```
    0 UOps.DEFINE_GLOBAL  : ptr.dtypes.float          []                               (0, 'data0', True)
@@ -183,8 +161,7 @@ uops:
    8 UOps.STORE          :                           [0, 3, 7]                        None
 ```
 
-step 7 introduces the cast operation that operates on step 6. Let's see
-the code gen on how it handles CAST:
+step 7 introduces the cast operation that operates on step 6. Let's see the code gen on how it handles CAST:
 
 ```python
       elif uop in {UOps.CAST, UOps.BITCAST}:
@@ -197,9 +174,7 @@ the code gen on how it handles CAST:
           val = lang.render_cast([r[x] for x in vin], dtype, bitcast=False)
 ```
 
-In our case, it's just calling `render_cast` with the input value, which is
-stored in the register `r` with the value of the addition operation. dtype 
-would be float as we wanted to cast it to float. Let's see `render_cast`:
+In our case, it's just calling `render_cast` with the input value, which is stored in the register `r` with the value of the addition operation. dtype would be float as we wanted to cast it to float. Let's see `render_cast`:
 
 ```python
   def render_cast(self, x:List[str], var_dtype:DType, bitcast=False) -> str:
@@ -210,27 +185,20 @@ would be float as we wanted to cast it to float. Let's see `render_cast`:
     return f"{self.float4.replace('float4', self.render_dtype(var_dtype))}({','.join(x)})"
 ```
 
-Our scenario hits line 2, so we return `(float)((val0+val1))`. Note that
-the value of x would be `["(val0+val1)"]`. 
+Our scenario hits line 2, so we return `(float)((val0+val1))`. Note that the value of x would be `["(val0+val1)"]`.
 
-Also note that what I show here is the parent method defined by `CStyleLanguage`
-that may not reflect the actual GPU usage. In metal that's actually the case,
-so our MetalLanguage, which inherits from CStyleLanguage, overrides the render_cast
-method:
+Also note that what I show here is the parent method defined by `CStyleLanguage` that may not reflect the actual GPU usage. In metal that's actually the case, so our MetalLanguage, which inherits from CStyleLanguage, overrides the render_cast method:
 
 ```python
   def render_cast(self, x: List[str], var_dtype: DType, bitcast=False) -> str:
     return f"as_type<{self.render_dtype(var_dtype)}>({x[0]})" if bitcast else super().render_cast(x, var_dtype)
 ```
 
-Although our simple case it falls back to the parent method, it will use the `as_type`
-keyword for something unique to metal in certain scenarios. This is part of how you
-would extend tinygrad to custom accelerator.
+Although our simple case it falls back to the parent method, it will use the `as_type` keyword for something unique to metal in certain scenarios. This is part of how you would extend tinygrad to custom accelerator.
 
 # ALU
 
-All the arithmetic logic unit are handled similarly. In our case it is
-an addition, rendered as `(val0 + val1)`.
+All the arithmetic logic unit are handled similarly. In our case it is an addition, rendered as `(val0 + val1)`.
 
 ```python
       elif uop is UOps.ALU:
@@ -246,13 +214,9 @@ an addition, rendered as `(val0 + val1)`.
         else: kk(f"{lang.render_dtype(dtype)} {ssa('alu',u)} = {val};")
 ```
 
-In our case, `operands = [strip_parens(r[v]) if v.arg == args else r[v]for v in vin]`
-is executed. Recall that vin is the two load operation, and the operands value
-end up being `['val0', 'val1']` given how the two loads stored the value 
-in register. `args` is 'ADD'. 
+In our case, `operands = [strip_parens(r[v]) if v.arg == args else r[v]for v in vin]` is executed. Recall that vin is the two load operation, and the operands value end up being `['val0', 'val1']` given how the two loads stored the value in register. `args` is 'ADD'.
 
-code_for_op is defined in the shared CStyleLanguage class unless overriden by
-specific inheritants:
+code_for_op is defined in the shared CStyleLanguage class unless overriden by specific inheritants:
 
 ```python
   code_for_op: Dict = {
@@ -264,9 +228,4 @@ specific inheritants:
     TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}?{b}:{c})"}
 ```
 
-and an ADD operation is just adding concatenating the two operands with
-a plus sign and surround them with parentheses. Finally we store the
-rendered result in the register dictionary ` r[u] = val` such that
-the previous CAST operation will pick it up. Similarly you can see
-how other operations are implemented.
-
+and an ADD operation is just adding concatenating the two operands with a plus sign and surround them with parentheses. Finally we store the rendered result in the register dictionary ` r[u] = val` such that the previous CAST operation will pick it up. Similarly you can see how other operations are implemented.

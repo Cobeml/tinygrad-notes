@@ -10,8 +10,7 @@ class UOpMetaClass(type):
     UOpMetaClass.ucache[key] = ref = weakref.ref(created:=super().__call__(*key))
 ```
 
-If the four arguments: `op`, `dtype`, `src`, `arg` are the same, then the same class instance will be returned, instead of 
-being created. This means you can do comparison directly on two UOp tree:
+If the four arguments: `op`, `dtype`, `src`, `arg` are the same, then the same class instance will be returned, instead of being created. This means you can do comparison directly on two UOp tree:
 
 ```python
 from tinygrad.uop.ops import UOp, Ops
@@ -61,9 +60,7 @@ Note that the UOp usage here is just made up. The actual UOp tinygrad generated 
 
 ## Checking if two UOp trees are almost equal
 
-Singleton pattern makes it easy to modify, transform and compare the AST. For example if you want to check if your trees
-are "almost equal". We can see that `a` and `c` only differs in their `Ops.DEFINE_GLOBAL`. You can write a function
-that removes `DEFINE_GLOBAL` and compare the rest of the tree:
+Singleton pattern makes it easy to modify, transform and compare the AST. For example if you want to check if your trees are "almost equal". We can see that `a` and `c` only differs in their `Ops.DEFINE_GLOBAL`. You can write a function that removes `DEFINE_GLOBAL` and compare the rest of the tree:
 
 ```python
 def remove_buf(uop: UOp):

@@ -1,8 +1,6 @@
 # Documentation on Tinygrad's IR
 
-Each uop represent an operation in tinygrad's intermediate representation,
-also known as the graph.
-They are inserted as follows:
+Each uop represent an operation in tinygrad's intermediate representation, also known as the graph. They are inserted as follows:
 
 ```python
 from tinygrad.codegen.uops import UOpGraph, UOps
@@ -16,22 +14,15 @@ and can be rendered into target platform's code as such:
 s = uops_to_cstyle(MetalLanguage(), 'tester', g)
 ```
 
-The main way to modify the graph is by calling the `add` method with the 
-following arguments:
+The main way to modify the graph is by calling the `add` method with the following arguments:
 
 - `dtype`: this specifies the data type. E.g. `dtypes.int`, `dtypes.float`
-- `vin`: this specifies the input to the UOp. For example, in a multiplication
-operation, the `vin` would be a tuple containing the two input operands.
-- `arg`: this is the argument to the UOp. Its content is specific to each
-uop and is utilized during the code generation process. For example,
-a global variable may specify a tuple, with one of the elements being
-the name of the variable, then the code generation process will extract
-that element and use it to generate the variable name.
+- `vin`: this specifies the input to the UOp. For example, in a multiplication operation, the `vin` would be a tuple containing the two input operands.
+- `arg`: this is the argument to the UOp. Its content is specific to each uop and is utilized during the code generation process. For example, a global variable may specify a tuple, with one of the elements being the name of the variable, then the code generation process will extract that element and use it to generate the variable name.
 
 ## CONST
 
-Uops.CONST declares a constant variable. There are two required parameters 
-in `add`: `dtype` and `arg`.
+Uops.CONST declares a constant variable. There are two required parameters in `add`: `dtype` and `arg`.
 
 Example:
 ```python
@@ -42,8 +33,7 @@ c0 = g.add(UOps.CONST, dtypes.int, arg=10)
 
 ## DEFINE_GLOBAL
 
-UOps.DEFINE_GLOBAL declares a global variable. It is used as the parameter
-list for the function. 
+UOps.DEFINE_GLOBAL declares a global variable. It is used as the parameter list for the function.
 
 - `arg`: a three element tuple:
   - `0`: the index of the parameter in the parameter list
@@ -88,14 +78,13 @@ for (int ridx0 = 0; ridx0 < 10; ridx0++) {
 
 ## STORE
 
-STORE is for writing value to the output, which comes in the form of a parameter
-passed to the kernel function.
+STORE is for writing value to the output, which comes in the form of a parameter passed to the kernel function.
 
 - `dtype`: None
 - `vin`: None
 - `arg`: Three values must be UOp instance
   - `0`: the UOp for the output
-  - `1`: the index position in the output to store the value in 
+  - `1`: the index position in the output to store the value in
   - `2`: the value to store
 
 Example
@@ -140,8 +129,7 @@ ALU is for arithmetic, logical, and bitwise operations.
 - `arg`:
   - `0`: the operation type
 
-It is usually used in conjunction with other ops, for example, to load the first
-element from two input arrays and add them together:
+It is usually used in conjunction with other ops, for example, to load the first element from two input arrays and add them together:
 
 ```python
 c1 = g.add(UOps.DEFINE_GLOBAL, dtype=dtypes.int, vin=(), arg=(0, "data0", True))
@@ -157,11 +145,7 @@ store = g.add(UOps.STORE, vin=(c1, pos, c4))
 
 ## Special
 
-GPU kernels are usually executed in SIMT fashion, meaning each thread will need
-to identify itself among all the other threads, such that it can fetch the correct
-data. In the ALU example above, we are explicitly fetching the zeroth element
-via the CONST UOp, but we might want to declare a UOp that fetches element
-based on the threadID.
+GPU kernels are usually executed in SIMT fashion, meaning each thread will need to identify itself among all the other threads, such that it can fetch the correct data. In the ALU example above, we are explicitly fetching the zeroth element via the CONST UOp, but we might want to declare a UOp that fetches element based on the threadID.
 
 - `arg`:
   - `0`: incremental index among all the special uop
@@ -173,9 +157,7 @@ Example:
 position = g.add(UOps.SPECIAL, dtype=dtypes.int, arg=(0, "gidx0", 10))
 ```
 
-This means the thread is launched in a group containing ten threads, and each
-thread will get the value by iterating from 0 to 10 (exclusive). We can now
-modify the ALU example:
+This means the thread is launched in a group containing ten threads, and each thread will get the value by iterating from 0 to 10 (exclusive). We can now modify the ALU example:
 
 ```python
 c1 = g.add(UOps.DEFINE_GLOBAL, dtype=dtypes.int, vin=(), arg=(0, "data0", True))
